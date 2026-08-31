@@ -6,6 +6,7 @@ import requests
 from camera import take_snapshot
 from config import LOCATION_NAME, POLL_INTERVAL, RENDER_URL, UNIT_ID
 from crop import clear_crop, get_crop, set_crop
+from health import get_health_stats
 from location import set_location as persist_location
 
 
@@ -97,6 +98,7 @@ def _poll(cmd_queue, unit_state):
                     "interval": unit_state.get("interval"),
                     "crop": get_crop(),
                 },
+                "health": get_health_stats(),
             },
             timeout=5,
         )

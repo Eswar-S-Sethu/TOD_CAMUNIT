@@ -24,11 +24,12 @@ While running, type commands and press Enter:
 No `requirements.txt`. Install manually:
 
 ```bash
-pip install opencv-python requests
+pip install opencv-python requests psutil
 ```
 
 - `opencv-python` (`cv2`) — camera capture and JPEG encoding
 - `requests` — HTTP uploads and Render polling
+- `psutil` — system stats (CPU, memory, disk, temperature, battery) reported to dashboard on every poll
 
 There is no test suite. Manual testing requires a connected webcam and a running local media server at `http://localhost:5000`. The Render client connects to `https://tod-central-dashboard.onrender.com`.
 
@@ -39,6 +40,7 @@ There is no test suite. Manual testing requires a connected webcam and a running
 | Module | Responsibility |
 |--------|---------------|
 | `config.py` | All constants — URLs, IDs, paths, size limits, poll interval |
+| `health.py` | `get_health_stats()` — CPU %, memory %, disk %, temperature, battery via psutil |
 | `network.py` | `upload_payload()` — POST to local media server |
 | `detection.py` | `run_yolo_detection()`, `upload_detections()` — both stubs |
 | `storage.py` | Local 10 GB rolling queue — save, retry, upload tracking |
@@ -72,7 +74,7 @@ There is no test suite. Manual testing requires a connected webcam and a running
 - `take_snapshot()` — full frame, no crop, lower resolution/quality, for dashboard display only
 - `capture_and_save()` — applies crop region, full quality, saved locally + uploaded to media server
 
-**Local storage:** Every capture saved to `captures/` before upload is attempted. `captures/uploaded.log` tracks uploaded filenames. Files evicted only when 10 GB cap is hit. `captures/crop.json` persists the crop region; `captures/location.json` persists the location name — both survive Docker restarts via the volume mount.
+**Local storage:** Every capture saved to `captures/` before upload is attempted. `captures/uploaded.log` tracks uploaded filenames. Files evicted only when 10 GB cap is hit. `captures/crop.json` persists the crop region; `captures/location.json` persists the location name — both persist across restarts.
 
 **Dashboard:** Separate git repo, deployed to `https://tod-central-dashboard.onrender.com`.
 
