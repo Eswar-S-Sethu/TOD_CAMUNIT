@@ -31,7 +31,7 @@ pip install opencv-python requests psutil
 - `requests` — HTTP uploads and Render polling
 - `psutil` — system stats (CPU, memory, disk, temperature, battery) reported to dashboard on every poll
 
-There is no test suite. Manual testing requires a connected webcam and a running local media server at `http://localhost:5000`. The Render client connects to `https://tod-central-dashboard.onrender.com`.
+There is no test suite. Manual testing requires a connected webcam and the media server reachable at `https://tod.eswarsethu.dev`. The Render client connects to `https://tod-central-dashboard.onrender.com`.
 
 ## Architecture
 

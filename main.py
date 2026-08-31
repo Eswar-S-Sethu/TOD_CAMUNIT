@@ -37,10 +37,11 @@ def main():
         "interval":      args.interval,
         "interval_secs": _INTERVAL_MAP[args.interval],
         "location":      get_location(),
+        "standby":       False,
     }
 
     print(f"\nCamera unit starting — interval: {args.interval} | location: {get_location()}")
-    print("Commands: 'snap' | 'quit' | 'interval:30s' | 'interval:1min' | 'interval:2min'\n")
+    print("Commands: 'snap' | 'quit' | 'standby' | 'resume' | 'interval:30s' | 'interval:1min' | 'interval:2min'\n")
 
     cam.start()   # Begin continuous background camera read loop
 
@@ -66,6 +67,12 @@ def main():
             elif cmd == "snap":
                 print("--- On-demand capture ---")
                 capture_and_save("on_demand")
+            elif cmd == "standby":
+                unit_state["standby"] = True
+                print("Unit entering standby — captures paused.")
+            elif cmd == "resume":
+                unit_state["standby"] = False
+                print("Unit resuming normal operation.")
             elif cmd in ("interval:30s", "interval:1min", "interval:2min"):
                 label = cmd.split(":")[1]
                 unit_state["interval"]      = label
@@ -77,15 +84,16 @@ def main():
         if stop_event.is_set():
             break
 
-        retry_pending_uploads()
-
-        capture_and_save("start_of_interval")
+        if not unit_state["standby"]:
+            retry_pending_uploads()
+            capture_and_save("start_of_interval")
 
         wait = unit_state["interval_secs"] - 2
         if interruptible_sleep(wait, cmd_queue, stop_event, unit_state) == "quit":
             break
 
-        capture_and_save("end_of_interval")
+        if not unit_state["standby"]:
+            capture_and_save("end_of_interval")
 
         if interruptible_sleep(2, cmd_queue, stop_event, unit_state) == "quit":
             break

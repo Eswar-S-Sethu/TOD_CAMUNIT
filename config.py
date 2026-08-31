@@ -16,6 +16,6 @@ UPLOADED_LOG = STORAGE_DIR / "uploaded.log"
 RENDER_URL     = "https://tod-central-dashboard.onrender.com"
 POLL_INTERVAL  = 5                                       # seconds between Render polls
 
-# Local media server (stores production captures)
-UPLOAD_URL     = "http://localhost:5000/api/upload"
-DETECTIONS_URL = "http://localhost:5000/api/detections"  # STUB — not yet used
+# Media server (stores production captures)
+UPLOAD_URL     = "https://tod.eswarsethu.dev/api/upload"
+DETECTIONS_URL = "https://tod.eswarsethu.dev/api/detections"  # STUB — not yet used

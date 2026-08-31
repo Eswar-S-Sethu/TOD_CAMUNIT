@@ -80,11 +80,16 @@ def _process_commands(commands, cmd_queue, unit_state):
                 persist_location(location)
                 print(f"Location updated from dashboard: {location}")
 
+        elif cmd_type == "set_standby":
+            unit_state["standby"] = True
+            print("Unit entering standby from dashboard.")
+
+        elif cmd_type == "resume":
+            unit_state["standby"] = False
+            print("Unit resuming from dashboard.")
+
         elif cmd_type == "snap":
             cmd_queue.put("snap")
-
-        elif cmd_type == "stop":
-            cmd_queue.put("quit")
 
 
 def _poll(cmd_queue, unit_state):
@@ -94,6 +99,7 @@ def _poll(cmd_queue, unit_state):
             f"{RENDER_URL}/api/units/{UNIT_ID}/poll",
             json={
                 "location": unit_state.get("location"),
+                "standby":  unit_state.get("standby", False),
                 "config": {
                     "interval": unit_state.get("interval"),
                     "crop": get_crop(),

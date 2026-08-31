@@ -48,6 +48,12 @@ def interruptible_sleep(seconds, cmd_queue, stop_event, unit_state=None):
             unit_state["interval"]      = label
             unit_state["interval_secs"] = secs
             print(f"Interval updated to {label}")
+        elif cmd == "standby" and unit_state is not None:
+            unit_state["standby"] = True
+            print("Unit entering standby — captures paused.")
+        elif cmd == "resume" and unit_state is not None:
+            unit_state["standby"] = False
+            print("Unit resuming normal operation.")
         else:
-            print(f"Unknown command '{cmd}'. Commands: snap, quit, interval:30s/1min/2min")
+            print(f"Unknown command '{cmd}'. Commands: snap, quit, standby, resume, interval:30s/1min/2min")
     return None

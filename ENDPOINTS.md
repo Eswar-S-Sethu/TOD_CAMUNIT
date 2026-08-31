@@ -1,6 +1,6 @@
-# Server Endpoints Reference
+# Media Server Endpoints Reference
 
-Base URL: `https://your-server.com`
+Base URL: `https://tod.eswarsethu.dev`
 
 ---
 
@@ -22,7 +22,7 @@ Receives a single camera capture — the image, timestamp, and location metadata
 {
     "timestamp":    "2024-01-15 09:30:00",
     "location":     "Front Door Entrance",
-    "timing_label": "start_of_minute",
+    "timing_label": "start_of_interval",
     "image_format": "jpg",
     "image_base64": "<base64-encoded JPEG string>"
 }
@@ -33,8 +33,8 @@ Receives a single camera capture — the image, timestamp, and location metadata
 | Field | Type | Description |
 |---|---|---|
 | `timestamp` | `string` | Local capture time, format `YYYY-MM-DD HH:MM:SS` |
-| `location` | `string` | Fixed label identifying the camera unit |
-| `timing_label` | `string` | Either `"start_of_minute"` or `"end_of_minute"` |
+| `location` | `string` | Label identifying the camera unit (from `config.py` or `captures/location.json`) |
+| `timing_label` | `string` | `"start_of_interval"`, `"end_of_interval"`, or `"on_demand"` |
 | `image_format` | `string` | Always `"jpg"` |
 | `image_base64` | `string` | Base64-encoded JPEG. Maximum decoded size: 1 MB |
 
@@ -42,8 +42,8 @@ Receives a single camera capture — the image, timestamp, and location metadata
 
 | Status | Meaning |
 |---|---|
-| `200` | Payload accepted. The camera unit will not save a local fallback file. |
-| Any other / timeout | Treated as failure. The camera unit saves the payload locally and retries on the next cycle. |
+| `200` | Payload accepted. The camera unit marks the capture as uploaded in `uploaded.log`. |
+| Any other / timeout | Treated as failure. The capture stays in `captures/` and is retried at the start of the next loop cycle. |
 
 The response body is not read by the camera unit — only the status code matters.
 
@@ -67,7 +67,7 @@ Will receive YOLO detection results separately from the image, once the model is
 {
     "timestamp":    "2024-01-15 09:30:00",
     "location":     "Front Door Entrance",
-    "timing_label": "start_of_minute",
+    "timing_label": "start_of_interval",
     "detections": [
         {
             "label":      "person",
@@ -83,8 +83,8 @@ Will receive YOLO detection results separately from the image, once the model is
 | Field | Type | Description |
 |---|---|---|
 | `timestamp` | `string` | Local capture time, format `YYYY-MM-DD HH:MM:SS` |
-| `location` | `string` | Fixed label identifying the camera unit |
-| `timing_label` | `string` | Either `"start_of_minute"` or `"end_of_minute"` |
+| `location` | `string` | Label identifying the camera unit |
+| `timing_label` | `string` | `"start_of_interval"`, `"end_of_interval"`, or `"on_demand"` |
 | `detections` | `array` | List of YOLO detection objects |
 
 ### Detection Object
@@ -103,6 +103,6 @@ TBD — to be defined when the endpoint is implemented.
 
 ## Retry Behaviour
 
-When a POST to `/api/upload` fails, the camera unit saves the payload as a local JSON file (`capture_YYYYMMDD_HHMMSS_<label>.json`). At the start of the next loop cycle, all pending local files are replayed against `/api/upload` in chronological order. Successfully uploaded files are deleted; failed ones remain for the following cycle.
+When a POST to `/api/upload` fails (non-200 or timeout), the capture payload has already been saved as a local JSON file (`captures/capture_YYYYMMDD_HHMMSS_<label>.json`). At the start of the next loop cycle — provided the unit is not in standby — all pending local files are replayed against `/api/upload` in chronological order. Successfully uploaded filenames are recorded in `captures/uploaded.log`; the JSON files themselves are kept and only evicted when the 10 GB local storage cap is reached.
 
 Retry behaviour for `/api/detections` is TBD.
