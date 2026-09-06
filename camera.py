@@ -1,4 +1,5 @@
 import base64
+import time
 from datetime import datetime
 
 import cv2
@@ -6,13 +7,54 @@ import cv2
 from camera_manager import camera as cam
 from config import MAX_IMAGE_BYTES
 from crop import apply_crop
-from location import get_location
 from detection import run_yolo_detection, upload_detections
+from face_detection import has_faces
+from location import get_location
+from logger import log_capture
 from network import upload_payload
 from storage import mark_as_uploaded, save_locally
 
 _SNAPSHOT_MAX_WIDTH = 1280
 _SNAPSHOT_QUALITY   = 70
+_FACE_MAX_RETRIES   = 3
+_FACE_RETRY_DELAY   = 5  # seconds between retries
+
+
+def _get_face_checked_frame(get_frame_fn, context):
+    """
+    Calls get_frame_fn() to obtain a fresh frame and checks it for faces.
+    Retries up to _FACE_MAX_RETRIES times (with a delay) if faces are found.
+    On the 4th attempt the frame is returned regardless and a forced-capture
+    warning is written to the capture log.
+
+    get_frame_fn — callable returning a fresh frame (or None if camera unavailable)
+    context      — short label used in log messages
+
+    Returns the frame, or None if the camera produced no frame on the last attempt.
+    """
+    for attempt in range(1, _FACE_MAX_RETRIES + 2):  # attempts 1..4
+        frame = get_frame_fn()
+        if frame is None:
+            return None
+
+        if not has_faces(frame):
+            return frame
+
+        if attempt <= _FACE_MAX_RETRIES:
+            log_capture(
+                "WARN",
+                f"[{context}] Face detected — discarding frame "
+                f"(attempt {attempt}/{_FACE_MAX_RETRIES}), retrying in {_FACE_RETRY_DELAY}s",
+            )
+            time.sleep(_FACE_RETRY_DELAY)
+        else:
+            log_capture(
+                "WARN",
+                f"[{context}] FORCED CAPTURE — face still detected after "
+                f"{_FACE_MAX_RETRIES} retries. Frame taken and flagged.",
+            )
+
+    return frame  # reached only on 4th attempt (forced)
 
 
 def compress_and_encode_image(frame, max_bytes=MAX_IMAGE_BYTES):
@@ -29,12 +71,15 @@ def compress_and_encode_image(frame, max_bytes=MAX_IMAGE_BYTES):
 def take_snapshot():
     """
     Captures the full frame with no crop applied, resized for dashboard preview.
-    Used only for crop setup on the Render dashboard — not saved locally.
+    Checks for faces and retries up to _FACE_MAX_RETRIES times before a forced capture.
+    Used only for dashboard display — not saved locally.
     Returns (base64_str, width, height) or (None, None, None) on failure.
     """
-    frame = cam.get_frame()
+    frame = _get_face_checked_frame(cam.get_frame, "take_snapshot")
     if frame is None:
+        log_capture("ERROR", "[take_snapshot] No frame available from camera.")
         return None, None, None
+
     h, w = frame.shape[:2]
     if w > _SNAPSHOT_MAX_WIDTH:
         scale = _SNAPSHOT_MAX_WIDTH / w
@@ -45,22 +90,24 @@ def take_snapshot():
 
 def capture_and_save(label):
     """
-    Grabs the latest frame, applies the active crop region, saves a local copy,
-    then attempts to upload to the media server.
+    Grabs the latest frame, applies the active crop region, checks for faces
+    (retrying up to _FACE_MAX_RETRIES times), saves a local copy, then attempts upload.
     """
-    frame = cam.get_frame()
-    if frame is None:
-        print(f"Error: No frame available from camera for '{label}'.")
-        return
+    def _get_cropped_frame():
+        f = cam.get_frame()
+        return apply_crop(f) if f is not None else None
 
-    frame = apply_crop(frame)
+    frame = _get_face_checked_frame(_get_cropped_frame, label)
+    if frame is None:
+        log_capture("ERROR", f"[{label}] No frame available from camera.")
+        return
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     detections = run_yolo_detection(frame)
     base64_image = compress_and_encode_image(frame)
 
     if not base64_image:
-        print(f"Image compression failed for '{label}'.")
+        log_capture("ERROR", f"[{label}] Image compression failed.")
         return
 
     location = get_location()

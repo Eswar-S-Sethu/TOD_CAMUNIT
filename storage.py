@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 
 from config import MAX_STORAGE_BYTES, STORAGE_DIR, UPLOADED_LOG
+from logger import log_capture, log_transmission
 from network import upload_payload
 
 
@@ -54,6 +55,7 @@ def save_locally(payload, label):
     filepath = STORAGE_DIR / filename
     filepath.write_text(json.dumps(payload, indent=4))
     _enforce_storage_limit()
+    log_capture("INFO", f"Saved locally: {filename}")
     return filepath
 
 
@@ -77,7 +79,9 @@ def retry_pending_uploads():
             payload = json.loads(filepath.read_text())
             if upload_payload(payload):
                 uploaded.add(filepath.name)
-                print(f"  Uploaded: {filepath.name}")
+                log_transmission("INFO", f"Retry upload succeeded: {filepath.name}")
+            else:
+                log_transmission("WARN", f"Retry upload failed: {filepath.name}")
         except Exception as e:
-            print(f"  Retry failed for {filepath.name}: {e}")
+            log_transmission("WARN", f"Retry error for {filepath.name}: {e}")
     _save_uploaded_set(uploaded)

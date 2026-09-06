@@ -8,6 +8,8 @@ from config import LOCATION_NAME, POLL_INTERVAL, RENDER_URL, UNIT_ID
 from crop import clear_crop, get_crop, set_crop
 from health import get_health_stats
 from location import set_location as persist_location
+from logger import log_transmission, log_unexpected
+from wifi import connect_to_network, get_network_info, scan_networks
 
 
 def _register(unit_state):
@@ -24,15 +26,16 @@ def _register(unit_state):
         )
         print(f"Registered with Render dashboard as '{UNIT_ID}'")
     except Exception as e:
-        print(f"Warning: Could not register with Render ({e})")
+        log_transmission("WARN", f"Could not register with Render dashboard: {e}")
 
 
 def _send_snapshot():
     """Takes a preview snapshot and POSTs it to the Render dashboard."""
     img_b64, width, height = take_snapshot()
     if img_b64 is None:
-        print("Warning: Snapshot requested but no frame available.")
+        log_transmission("WARN", "Snapshot requested but no frame available (or all retries had faces).")
         return
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         requests.post(
             f"{RENDER_URL}/api/units/{UNIT_ID}/snapshot",
@@ -40,12 +43,13 @@ def _send_snapshot():
                 "image_base64": img_b64,
                 "width": width,
                 "height": height,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp": timestamp,
             },
             timeout=15,
         )
+        log_transmission("INFO", f"Snapshot sent to Render dashboard @ {timestamp}")
     except Exception as e:
-        print(f"Warning: Could not send snapshot to Render ({e})")
+        log_transmission("WARN", f"Could not send snapshot to Render dashboard: {e}")
 
 
 def _process_commands(commands, cmd_queue, unit_state):
@@ -91,6 +95,46 @@ def _process_commands(commands, cmd_queue, unit_state):
         elif cmd_type == "snap":
             cmd_queue.put("snap")
 
+        elif cmd_type == "wifi_scan":
+            threading.Thread(target=_do_wifi_scan, daemon=True).start()
+
+        elif cmd_type == "wifi_connect":
+            ssid     = cmd.get("ssid", "")
+            password = cmd.get("password", "")
+            threading.Thread(target=_do_wifi_connect, args=(ssid, password), daemon=True).start()
+
+        else:
+            log_unexpected("WARN", f"Unknown command type received from dashboard: '{cmd_type}' — full payload: {cmd}")
+
+
+def _do_wifi_scan():
+    """Scans for WiFi networks and POSTs results back to the dashboard."""
+    networks = scan_networks()
+    try:
+        requests.post(
+            f"{RENDER_URL}/api/units/{UNIT_ID}/wifi_scan",
+            json={"networks": networks},
+            timeout=10,
+        )
+        log_transmission("INFO", f"WiFi scan results sent ({len(networks)} network(s) found)")
+    except Exception as e:
+        log_transmission("WARN", f"Failed to send WiFi scan results: {e}")
+
+
+def _do_wifi_connect(ssid, password):
+    """Connects to a WiFi network and POSTs the result back to the dashboard."""
+    success, message = connect_to_network(ssid, password)
+    try:
+        requests.post(
+            f"{RENDER_URL}/api/units/{UNIT_ID}/wifi_connect_result",
+            json={"ssid": ssid, "success": success, "message": message},
+            timeout=10,
+        )
+        level = "INFO" if success else "WARN"
+        log_transmission(level, f"WiFi connect '{ssid}': {message}")
+    except Exception as e:
+        log_transmission("WARN", f"Failed to send WiFi connect result: {e}")
+
 
 def _poll(cmd_queue, unit_state):
     """Polls Render for pending commands and reports current state."""
@@ -104,7 +148,8 @@ def _poll(cmd_queue, unit_state):
                     "interval": unit_state.get("interval"),
                     "crop": get_crop(),
                 },
-                "health": get_health_stats(),
+                "health":   get_health_stats(),
+                "network":  get_network_info(),
             },
             timeout=5,
         )
@@ -113,7 +158,7 @@ def _poll(cmd_queue, unit_state):
             if commands:
                 _process_commands(commands, cmd_queue, unit_state)
     except Exception as e:
-        print(f"Warning: Poll to Render failed ({e})")
+        log_transmission("WARN", f"Poll to Render dashboard failed: {e}")
 
 
 def start_render_client(cmd_queue, stop_event, unit_state):

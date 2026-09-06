@@ -1,5 +1,9 @@
 from pathlib import Path
 
+# Directories
+LOGS_DIR   = Path("logs")
+MODELS_DIR = Path("models")
+
 # Camera / location
 LOCATION_NAME = "Front Door Entrance"
 UNIT_ID       = "cam-unit-01"          # Unique ID for this unit — change per device

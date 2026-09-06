@@ -1,13 +1,16 @@
 import argparse
 import queue
 import threading
+import traceback
 
 from camera import capture_and_save
 from camera_manager import camera as cam
 from commands import input_listener, interruptible_sleep
 from config import STORAGE_DIR
 from crop import load_crop
+from face_detection import load_model
 from location import get_location, load_location
+from logger import log_crash
 from render_client import start_render_client
 from storage import retry_pending_uploads
 
@@ -31,6 +34,7 @@ def main():
     STORAGE_DIR.mkdir(exist_ok=True)
     load_crop()      # Restore any saved crop region from disk
     load_location()  # Restore any saved location override from disk
+    load_model()     # Download and load the face detection model
 
     # Shared mutable state — updated by render_client and commands
     unit_state = {
@@ -54,53 +58,59 @@ def main():
 
     start_render_client(cmd_queue, stop_event, unit_state)
 
-    while not stop_event.is_set():
-        # Drain commands queued since last cycle
-        while not cmd_queue.empty():
-            try:
-                cmd = cmd_queue.get_nowait()
-            except queue.Empty:
+    try:
+        while not stop_event.is_set():
+            # Drain commands queued since last cycle
+            while not cmd_queue.empty():
+                try:
+                    cmd = cmd_queue.get_nowait()
+                except queue.Empty:
+                    break
+                if cmd in ("quit", "stop", "exit", "q"):
+                    stop_event.set()
+                    break
+                elif cmd == "snap":
+                    print("--- On-demand capture ---")
+                    capture_and_save("on_demand")
+                elif cmd == "standby":
+                    unit_state["standby"] = True
+                    print("Unit entering standby — captures paused.")
+                elif cmd == "resume":
+                    unit_state["standby"] = False
+                    print("Unit resuming normal operation.")
+                elif cmd in ("interval:30s", "interval:1min", "interval:2min"):
+                    label = cmd.split(":")[1]
+                    unit_state["interval"]      = label
+                    unit_state["interval_secs"] = _INTERVAL_MAP[label]
+                    print(f"Interval updated to {label}")
+                else:
+                    print(f"Unknown command '{cmd}'.")
+
+            if stop_event.is_set():
                 break
-            if cmd in ("quit", "stop", "exit", "q"):
-                stop_event.set()
+
+            if not unit_state["standby"]:
+                retry_pending_uploads()
+                capture_and_save("start_of_interval")
+
+            wait = unit_state["interval_secs"] - 2
+            if interruptible_sleep(wait, cmd_queue, stop_event, unit_state) == "quit":
                 break
-            elif cmd == "snap":
-                print("--- On-demand capture ---")
-                capture_and_save("on_demand")
-            elif cmd == "standby":
-                unit_state["standby"] = True
-                print("Unit entering standby — captures paused.")
-            elif cmd == "resume":
-                unit_state["standby"] = False
-                print("Unit resuming normal operation.")
-            elif cmd in ("interval:30s", "interval:1min", "interval:2min"):
-                label = cmd.split(":")[1]
-                unit_state["interval"]      = label
-                unit_state["interval_secs"] = _INTERVAL_MAP[label]
-                print(f"Interval updated to {label}")
-            else:
-                print(f"Unknown command '{cmd}'.")
 
-        if stop_event.is_set():
-            break
+            if not unit_state["standby"]:
+                capture_and_save("end_of_interval")
 
-        if not unit_state["standby"]:
-            retry_pending_uploads()
-            capture_and_save("start_of_interval")
+            if interruptible_sleep(2, cmd_queue, stop_event, unit_state) == "quit":
+                break
 
-        wait = unit_state["interval_secs"] - 2
-        if interruptible_sleep(wait, cmd_queue, stop_event, unit_state) == "quit":
-            break
+    except Exception:
+        log_crash(traceback.format_exc())
+        raise
 
-        if not unit_state["standby"]:
-            capture_and_save("end_of_interval")
-
-        if interruptible_sleep(2, cmd_queue, stop_event, unit_state) == "quit":
-            break
-
-    stop_event.set()
-    cam.stop()
-    print("Program shut down cleanly.")
+    finally:
+        stop_event.set()
+        cam.stop()
+        print("Program shut down cleanly.")
 
 
 if __name__ == "__main__":
