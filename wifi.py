@@ -8,6 +8,8 @@ Falls back gracefully on any failure so it never blocks the main loop.
 
 import socket
 import subprocess
+import time
+import urllib.request
 
 import psutil
 
@@ -86,11 +88,50 @@ def scan_networks():
         return []
 
 
+def _check_internet(timeout=6):
+    """
+    Returns True if there is a working internet connection.
+    Uses Google's connectivity check endpoint (returns HTTP 204, no data).
+    """
+    try:
+        urllib.request.urlopen(
+            "http://connectivitycheck.gstatic.com/generate_204",
+            timeout=timeout,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _disconnect_wifi():
+    """Disconnects the active WiFi interface so the USB modem takes over."""
+    try:
+        out = subprocess.check_output(
+            ["nmcli", "-t", "-f", "type,device", "dev"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+        )
+        for line in out.strip().splitlines():
+            if line.startswith("wifi:"):
+                iface = line.split(":", 1)[1]
+                subprocess.run(
+                    ["nmcli", "dev", "disconnect", iface],
+                    capture_output=True,
+                    timeout=10,
+                )
+                break
+    except Exception:
+        pass
+
+
 def connect_to_network(ssid, password):
     """
-    Connects to the specified WiFi network using nmcli.
+    Connects to the specified WiFi network using nmcli, then verifies internet
+    access. If no internet is reachable on the new network, disconnects WiFi so
+    the USB modem resumes as the default route.
     Returns (success: bool, message: str).
-    Blocks for up to 40 seconds — call from a background thread.
+    Blocks for up to ~55 seconds — call from a background thread.
     """
     try:
         cmd = ["nmcli", "dev", "wifi", "connect", ssid]
@@ -102,10 +143,20 @@ def connect_to_network(ssid, password):
             text=True,
             timeout=40,
         )
-        if result.returncode == 0:
-            return True, f"Connected to '{ssid}'"
-        msg = (result.stderr or result.stdout).strip()
-        return False, msg or "Connection failed"
+        if result.returncode != 0:
+            msg = (result.stderr or result.stdout).strip()
+            return False, msg or "Connection failed"
+
+        # Give the interface a moment to get a DHCP address and update routing
+        time.sleep(4)
+
+        if _check_internet():
+            return True, f"Connected to '{ssid}' — internet OK"
+
+        # No internet on this network — revert to USB modem
+        _disconnect_wifi()
+        return False, f"'{ssid}' has no internet access — reverted to USB modem"
+
     except subprocess.TimeoutExpired:
         return False, "Connection attempt timed out after 40 s"
     except Exception as e:
